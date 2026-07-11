@@ -1,0 +1,386 @@
+{
+  "name": "CA.RO ZAP - Motor de Atendimento (Evolution + OpenAI + Claude)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "caro-zap",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "id": "webhook_evolution",
+      "name": "Webhook Evolution",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-1600, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst body = $json.body ?? $json;\nconst data = body.data ?? {};\nconst key = data.key ?? {};\nconst message = data.message ?? {};\nconst instance = body.instance ?? body.instanceName ?? '';\nconst remoteJid = key.remoteJid ?? '';\nconst fromMe = key.fromMe ?? false;\nif (fromMe) { return []; }\nif (String(remoteJid).includes('@g.us')) { return []; }\nconst phone = String(remoteJid).split('@')[0].split(':')[0];\nconst pushName = data.pushName ?? '';\nlet msgType='text', textContent='', mediaBase64='', mimeType='';\nif (message.conversation) textContent = message.conversation;\nelse if (message.extendedTextMessage && message.extendedTextMessage.text) textContent = message.extendedTextMessage.text;\nif (message.audioMessage) { msgType='audio'; mimeType=message.audioMessage.mimetype||'audio/ogg'; }\nelse if (message.imageMessage) { msgType='image'; mimeType=message.imageMessage.mimetype||'image/jpeg'; textContent=message.imageMessage.caption||''; }\nelse if (message.documentMessage) { msgType='document'; mimeType=message.documentMessage.mimetype||'application/pdf'; textContent=message.documentMessage.caption||message.documentMessage.fileName||''; }\nmediaBase64 = message.base64 || data.base64 || body.base64 || (message.audioMessage&&message.audioMessage.base64) || (message.imageMessage&&message.imageMessage.base64) || (message.documentMessage&&message.documentMessage.base64) || '';\nconst esc = s => String(s ?? '').replace(/'/g, \"''\");\nreturn [{ json: { instance, phone, pushName, fromMe, msgType, textContent, mediaBase64, mimeType, phone_esc: esc(phone), pushName_esc: esc(pushName) } }];\n"
+      },
+      "id": "normalizar_payload",
+      "name": "Normalizar Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-1400, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select * from tenants where evolution_instance = '{{ $json.instance }}' and status = 'active' limit 1;",
+        "options": {}
+      },
+      "id": "buscar_tenant",
+      "name": "Buscar Tenant",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [-1200, 300],
+      "credentials": { "postgres": { "id": "REPLACE_PG", "name": "Supabase Postgres" } }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            { "conditions": { "options": { "caseSensitive": true, "typeValidation": "loose", "version": 2 }, "conditions": [ { "leftValue": "={{ $('Normalizar Payload').item.json.msgType }}", "rightValue": "audio", "operator": { "type": "string", "operation": "equals" } } ], "combinator": "and" }, "renameOutput": true, "outputKey": "audio" },
+            { "conditions": { "options": { "caseSensitive": true, "typeValidation": "loose", "version": 2 }, "conditions": [ { "leftValue": "={{ $('Normalizar Payload').item.json.msgType }}", "rightValue": "image", "operator": { "type": "string", "operation": "equals" } } ], "combinator": "and" }, "renameOutput": true, "outputKey": "image" },
+            { "conditions": { "options": { "caseSensitive": true, "typeValidation": "loose", "version": 2 }, "conditions": [ { "leftValue": "={{ $('Normalizar Payload').item.json.msgType }}", "rightValue": "document", "operator": { "type": "string", "operation": "equals" } } ], "combinator": "and" }, "renameOutput": true, "outputKey": "document" },
+            { "conditions": { "options": { "caseSensitive": true, "typeValidation": "loose", "version": 2 }, "conditions": [ { "leftValue": "={{ $('Normalizar Payload').item.json.msgType }}", "rightValue": "text", "operator": { "type": "string", "operation": "equals" } } ], "combinator": "and" }, "renameOutput": true, "outputKey": "text" }
+          ]
+        },
+        "options": { "fallbackOutput": 3 }
+      },
+      "id": "tipo_de_midia",
+      "name": "Tipo de Midia",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [-1000, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst b64 = $('Normalizar Payload').item.json.mediaBase64;\nconst mime = $('Normalizar Payload').item.json.mimeType || 'audio/ogg';\nif (!b64) { return [{ json: { text: '[Audio recebido, sem conteudo para transcrever]' }, _skip:true }]; }\nreturn [{ json: {}, binary: { data: { data: b64, mimeType: mime, fileName: 'audio.ogg' } } }];\n"
+      },
+      "id": "audio_to_binario",
+      "name": "Audio to Binario",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-800, -40]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/audio/transcriptions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": { "parameters": [ { "parameterType": "formBinaryData", "name": "file", "inputDataFieldName": "data" }, { "parameterType": "formData", "name": "model", "value": "whisper-1" }, { "parameterType": "formData", "name": "language", "value": "pt" } ] },
+        "options": {}
+      },
+      "id": "whisper_transcricao",
+      "name": "Whisper Transcricao",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-600, -40],
+      "credentials": { "httpHeaderAuth": { "id": "REPLACE_OAI", "name": "OpenAI Header Auth" } }
+    },
+    {
+      "parameters": { "assignments": { "assignments": [ { "id": "a1", "name": "msgText", "type": "string", "value": "={{ $json.text }}" } ] }, "options": {} },
+      "id": "texto_do_audio",
+      "name": "Texto do Audio",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-400, -40]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst mime = $('Normalizar Payload').item.json.mimeType || 'image/jpeg';\nconst b64 = $('Normalizar Payload').item.json.mediaBase64 || '';\nconst caption = $('Normalizar Payload').item.json.textContent || '';\nconst body = { model:'gpt-4o', max_tokens:500, messages:[{role:'user',content:[\n  {type:'text', text:'Voce le imagens enviadas por clientes no WhatsApp. Descreva a imagem e transcreva TODO texto visivel (documentos, comprovantes, prints). Seja objetivo. Legenda do cliente: '+caption},\n  {type:'image_url', image_url:{ url: 'data:'+mime+';base64,'+b64 }} ]}] };\nreturn [{ json: { openaiBody: body } }];\n"
+      },
+      "id": "body_visao",
+      "name": "Body Visao",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-800, 140]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.openaiBody }}",
+        "options": {}
+      },
+      "id": "gpt4o_visao",
+      "name": "GPT-4o Visao",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-600, 140],
+      "credentials": { "httpHeaderAuth": { "id": "REPLACE_OAI", "name": "OpenAI Header Auth" } }
+    },
+    {
+      "parameters": { "assignments": { "assignments": [ { "id": "a1", "name": "msgText", "type": "string", "value": "={{ $json.choices[0].message.content }}" } ] }, "options": {} },
+      "id": "texto_da_imagem",
+      "name": "Texto da Imagem",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-400, 140]
+    },
+    {
+      "parameters": { "assignments": { "assignments": [ { "id": "a1", "name": "msgText", "type": "string", "value": "={{ $('Normalizar Payload').item.json.textContent || '[Documento recebido pelo cliente]' }}" } ] }, "options": {} },
+      "id": "texto_do_documento",
+      "name": "Texto do Documento",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-600, 320]
+    },
+    {
+      "parameters": { "assignments": { "assignments": [ { "id": "a1", "name": "msgText", "type": "string", "value": "={{ $('Normalizar Payload').item.json.textContent }}" } ] }, "options": {} },
+      "id": "texto_simples",
+      "name": "Texto Simples",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [-600, 500]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst t = $json.msgText || '';\nreturn [{ json: { msgText: t, msgText_esc: String(t).replace(/'/g,\"''\"), msgType: $('Normalizar Payload').item.json.msgType, mediaUrl: '' } }];\n"
+      },
+      "id": "consolidar_mensagem",
+      "name": "Consolidar Mensagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-180, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into contacts (tenant_id, name, phone, last_message_at) values ('{{ $('Buscar Tenant').item.json.id }}', '{{ $('Normalizar Payload').item.json.pushName_esc }}', '{{ $('Normalizar Payload').item.json.phone_esc }}', now()) on conflict (tenant_id, phone) do update set last_message_at = now(), name = case when contacts.name = '' then excluded.name else contacts.name end returning *;",
+        "options": {}
+      },
+      "id": "upsert_contato",
+      "name": "Upsert Contato",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [40, 300],
+      "credentials": { "postgres": { "id": "REPLACE_PG", "name": "Supabase Postgres" } }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into messages (tenant_id, contact_id, sender, body, type) values ('{{ $('Buscar Tenant').item.json.id }}', '{{ $('Upsert Contato').item.json.id }}', 'customer', '{{ $('Consolidar Mensagem').item.json.msgText_esc }}', '{{ $('Consolidar Mensagem').item.json.msgType }}') returning *;",
+        "options": {}
+      },
+      "id": "salvar_msg_cliente",
+      "name": "Salvar Msg Cliente",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [240, 300],
+      "credentials": { "postgres": { "id": "REPLACE_PG", "name": "Supabase Postgres" } }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select coalesce(json_agg(json_build_object('sender', sender, 'body', body) order by created_at), '[]'::json) as history from ( select sender, body, created_at from messages where contact_id = '{{ $('Upsert Contato').item.json.id }}' order by created_at desc limit 8 ) sub;",
+        "options": {}
+      },
+      "id": "buscar_historico",
+      "name": "Buscar Historico",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [440, 300],
+      "credentials": { "postgres": { "id": "REPLACE_PG", "name": "Supabase Postgres" } }
+    },
+    {
+      "parameters": {
+        "conditions": { "options": { "caseSensitive": true, "typeValidation": "loose", "version": 2 }, "conditions": [ { "leftValue": "={{ $('Upsert Contato').item.json.ai_auto_reply }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } } ], "combinator": "and" },
+        "options": {}
+      },
+      "id": "ia_ligada",
+      "name": "IA Ligada",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [640, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst tenant = $('Buscar Tenant').item.json;\nlet faqs = tenant.kb_faqs;\nif (typeof faqs !== 'string') faqs = JSON.stringify(faqs || []);\nconst history = $('Buscar Historico').item.json.history || [];\nconst system = `Voce e o assistente virtual da empresa \"${tenant.name}\" (nicho: ${tenant.niche}). Responda no WhatsApp de forma gentil, humana e conforme as regras do negocio.\n\nBASE DE CONHECIMENTO (RAG):\n${tenant.kb_text || ''}\n\nFAQ:\n${faqs}\n\nCATALOGO E PRECOS:\n${tenant.kb_catalogue || ''}\n\nDIRETRIZES:\n1. Responda estritamente com base nos dados acima.\n2. NUNCA invente informacoes. Se nao souber, ofereca transferir para um atendente humano.\n3. Se o cliente pedir atendente/humano/gerente, inclua a palavra reservada [TRANSFERIR_HUMANO] no fim.\n4. Respostas curtas e faceis de ler no celular.`;\nlet msgs = history.map(h => ({ role: h.sender === 'customer' ? 'user' : 'assistant', content: (h.body || '...').toString() }));\nconst clean = [];\nfor (const m of msgs) { if (clean.length && clean[clean.length-1].role === m.role) clean[clean.length-1].content += \"\\n\" + m.content; else clean.push({ role: m.role, content: m.content }); }\nwhile (clean.length && clean[0].role !== 'user') clean.shift();\nif (!clean.length) clean.push({ role:'user', content: $('Consolidar Mensagem').item.json.msgText || 'Ola' });\nconst body = { model: 'claude-sonnet-5', max_tokens: 600, temperature: 0.2, system, messages: clean };\nreturn [{ json: { anthropicBody: body } }];\n"
+      },
+      "id": "body_claude",
+      "name": "Body Claude",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [840, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [ { "name": "anthropic-version", "value": "2023-06-01" } ] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.anthropicBody }}",
+        "options": {}
+      },
+      "id": "claude_resposta",
+      "name": "Claude Resposta",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1040, 200],
+      "credentials": { "httpHeaderAuth": { "id": "REPLACE_ANT", "name": "Anthropic API" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst r = $json;\nlet text = '';\nif (Array.isArray(r.content)) text = r.content.map(c => c.text || '').join('').trim();\nelse text = (r.completion || '').trim();\nlet transfer = false;\nif (text.includes('[TRANSFERIR_HUMANO]')) { transfer = true; text = text.replace('[TRANSFERIR_HUMANO]','').trim(); }\nconst lc = ($('Consolidar Mensagem').item.json.msgText || '').toLowerCase();\nif (/atendente|humano|gerente|falar com/.test(lc)) transfer = true;\nif (!text) text = 'Certo! Vou te transferir para um atendente humano agora mesmo. Um momento!';\nreturn [{ json: { replyText: text, replyText_esc: text.replace(/'/g,\"''\"), shouldTransfer: transfer } }];\n"
+      },
+      "id": "processar_claude",
+      "name": "Processar Claude",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1240, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst tenant = $('Buscar Tenant').item.json;\nconst history = $('Buscar Historico').item.json.history || [];\nconst current = $('Consolidar Mensagem').item.json.msgText || '';\nconst prompt = `Voce e um Analista de Leads Senior. Classifique o lead com base na mensagem e no contexto.\nEMPRESA: ${tenant.name} (nicho: ${tenant.niche})\nMENSAGEM DO CLIENTE: \"${current}\"\nHISTORICO: ${JSON.stringify(history.slice(-4))}\n\nRetorne SOMENTE um JSON com as chaves:\n- leadScore: \"hot\", \"warm\" ou \"cold\"\n- leadReason: string curta\n- suggestedTags: array de ate 3 strings curtas\n- moveStageTo: \"novo\" | \"contato\" | \"proposta\" | \"negociacao\" | \"fechado\"\n- customFields: objeto chave-valor com dados uteis extraidos`;\nconst body = { model:'gpt-4o-mini', temperature:0.1, response_format:{type:'json_object'}, messages:[{role:'system',content:'Responda SOMENTE com JSON valido, sem texto extra.'},{role:'user',content:prompt}] };\nreturn [{ json: { openaiBody: body } }];\n"
+      },
+      "id": "body_classificador",
+      "name": "Body Classificador",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1440, 200]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.openaiBody }}",
+        "options": {}
+      },
+      "id": "openai_classificar",
+      "name": "OpenAI Classificar",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1640, 200],
+      "credentials": { "httpHeaderAuth": { "id": "REPLACE_OAI", "name": "OpenAI Header Auth" } }
+    },
+    {
+      "parameters": {
+        "jsCode": "\nlet cls = {};\ntry { cls = JSON.parse($json.choices[0].message.content || '{}'); } catch(e) { cls = {}; }\nconst contact = $('Upsert Contato').item.json;\nconst proc = $('Processar Claude').item.json;\nconst order = ['novo','contato','proposta','negociacao','fechado'];\nlet stage = contact.pipeline_stage || 'novo';\nconst target = cls.moveStageTo || '';\nif (target && order.indexOf(target) > order.indexOf(stage)) stage = target;\nlet tags = Array.isArray(contact.tags) ? contact.tags.slice() : (function(){ try { return JSON.parse(contact.tags||'[]'); } catch(e){ return []; } })();\nfor (const t of (cls.suggestedTags || [])) if (t && !tags.includes(t)) tags.push(t);\nlet cf = (contact.custom_fields && typeof contact.custom_fields === 'object') ? contact.custom_fields : {};\nconst custom = Object.assign({}, cf, (cls.customFields || {}));\nconst aiOn = proc.shouldTransfer ? false : true;\nreturn [{ json: { lead_score: cls.leadScore || 'warm', lead_reason: String(cls.leadReason || '').replace(/'/g,\"''\"), pipeline_stage: stage, tags_json: JSON.stringify(tags).replace(/'/g,\"''\"), custom_json: JSON.stringify(custom).replace(/'/g,\"''\"), ai_auto_reply: aiOn, shouldTransfer: proc.shouldTransfer, replyText: proc.replyText, replyText_esc: proc.replyText_esc } }];\n"
+      },
+      "id": "consolidar_ia",
+      "name": "Consolidar IA",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1840, 200]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update contacts set lead_score = '{{ $json.lead_score }}', lead_reason = '{{ $json.lead_reason }}', pipeline_stage = '{{ $json.pipeline_stage }}', tags = '{{ $json.tags_json }}'::jsonb, custom_fields = '{{ $json.custom_json }}'::jsonb, ai_auto_reply = {{ $json.ai_auto_reply }}, last_message_at = now() where id = '{{ $('Upsert Contato').item.json.id }}' returning *;",
+        "options": {}
+      },
+      "id": "atualizar_contato",
+      "name": "Atualizar Contato",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2040, 200],
+      "credentials": { "postgres": { "id": "REPLACE_PG", "name": "Supabase Postgres" } }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into messages (tenant_id, contact_id, sender, body, type) values ('{{ $('Buscar Tenant').item.json.id }}', '{{ $('Upsert Contato').item.json.id }}', 'ai', '{{ $('Consolidar IA').item.json.replyText_esc }}', 'text') returning *;",
+        "options": {}
+      },
+      "id": "salvar_resposta_ia",
+      "name": "Salvar Resposta IA",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2240, 200],
+      "credentials": { "postgres": { "id": "REPLACE_PG", "name": "Supabase Postgres" } }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://SEU-EVOLUTION-HOST/message/sendText/{{ $('Normalizar Payload').item.json.instance }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "keypair",
+        "bodyParameters": { "parameters": [ { "name": "number", "value": "={{ $('Normalizar Payload').item.json.phone }}" }, { "name": "text", "value": "={{ $('Consolidar IA').item.json.replyText }}" } ] },
+        "options": {}
+      },
+      "id": "enviar_whatsapp",
+      "name": "Enviar WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2440, 200],
+      "credentials": { "httpHeaderAuth": { "id": "REPLACE_EVO", "name": "Evolution API" } }
+    },
+    {
+      "parameters": {
+        "conditions": { "options": { "caseSensitive": true, "typeValidation": "loose", "version": 2 }, "conditions": [ { "leftValue": "={{ $('Consolidar IA').item.json.shouldTransfer }}", "rightValue": true, "operator": { "type": "boolean", "operation": "true", "singleValue": true } } ], "combinator": "and" },
+        "options": {}
+      },
+      "id": "precisa_transferir",
+      "name": "Precisa Transferir",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [2640, 200]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into notes (tenant_id, contact_id, body, author) values ('{{ $('Buscar Tenant').item.json.id }}', '{{ $('Upsert Contato').item.json.id }}', 'Transferido automaticamente da IA para atendimento humano. Motivo: {{ $('Consolidar IA').item.json.lead_reason }}', 'Sistema CA.RO ZAP') returning *;",
+        "options": {}
+      },
+      "id": "nota_de_transferencia",
+      "name": "Nota de Transferencia",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [2840, 120],
+      "credentials": { "postgres": { "id": "REPLACE_PG", "name": "Supabase Postgres" } }
+    }
+  ],
+  "connections": {
+    "Webhook Evolution": { "main": [ [ { "node": "Normalizar Payload", "type": "main", "index": 0 } ] ] },
+    "Normalizar Payload": { "main": [ [ { "node": "Buscar Tenant", "type": "main", "index": 0 } ] ] },
+    "Buscar Tenant": { "main": [ [ { "node": "Tipo de Midia", "type": "main", "index": 0 } ] ] },
+    "Tipo de Midia": { "main": [ [ { "node": "Audio to Binario", "type": "main", "index": 0 } ], [ { "node": "Body Visao", "type": "main", "index": 0 } ], [ { "node": "Texto do Documento", "type": "main", "index": 0 } ], [ { "node": "Texto Simples", "type": "main", "index": 0 } ] ] },
+    "Audio to Binario": { "main": [ [ { "node": "Whisper Transcricao", "type": "main", "index": 0 } ] ] },
+    "Whisper Transcricao": { "main": [ [ { "node": "Texto do Audio", "type": "main", "index": 0 } ] ] },
+    "Texto do Audio": { "main": [ [ { "node": "Consolidar Mensagem", "type": "main", "index": 0 } ] ] },
+    "Body Visao": { "main": [ [ { "node": "GPT-4o Visao", "type": "main", "index": 0 } ] ] },
+    "GPT-4o Visao": { "main": [ [ { "node": "Texto da Imagem", "type": "main", "index": 0 } ] ] },
+    "Texto da Imagem": { "main": [ [ { "node": "Consolidar Mensagem", "type": "main", "index": 0 } ] ] },
+    "Texto do Documento": { "main": [ [ { "node": "Consolidar Mensagem", "type": "main", "index": 0 } ] ] },
+    "Texto Simples": { "main": [ [ { "node": "Consolidar Mensagem", "type": "main", "index": 0 } ] ] },
+    "Consolidar Mensagem": { "main": [ [ { "node": "Upsert Contato", "type": "main", "index": 0 } ] ] },
+    "Upsert Contato": { "main": [ [ { "node": "Salvar Msg Cliente", "type": "main", "index": 0 } ] ] },
+    "Salvar Msg Cliente": { "main": [ [ { "node": "Buscar Historico", "type": "main", "index": 0 } ] ] },
+    "Buscar Historico": { "main": [ [ { "node": "IA Ligada", "type": "main", "index": 0 } ] ] },
+    "IA Ligada": { "main": [ [ { "node": "Body Claude", "type": "main", "index": 0 } ] ] },
+    "Body Claude": { "main": [ [ { "node": "Claude Resposta", "type": "main", "index": 0 } ] ] },
+    "Claude Resposta": { "main": [ [ { "node": "Processar Claude", "type": "main", "index": 0 } ] ] },
+    "Processar Claude": { "main": [ [ { "node": "Body Classificador", "type": "main", "index": 0 } ] ] },
+    "Body Classificador": { "main": [ [ { "node": "OpenAI Classificar", "type": "main", "index": 0 } ] ] },
+    "OpenAI Classificar": { "main": [ [ { "node": "Consolidar IA", "type": "main", "index": 0 } ] ] },
+    "Consolidar IA": { "main": [ [ { "node": "Atualizar Contato", "type": "main", "index": 0 } ] ] },
+    "Atualizar Contato": { "main": [ [ { "node": "Salvar Resposta IA", "type": "main", "index": 0 } ] ] },
+    "Salvar Resposta IA": { "main": [ [ { "node": "Enviar WhatsApp", "type": "main", "index": 0 } ] ] },
+    "Enviar WhatsApp": { "main": [ [ { "node": "Precisa Transferir", "type": "main", "index": 0 } ] ] },
+    "Precisa Transferir": { "main": [ [ { "node": "Nota de Transferencia", "type": "main", "index": 0 } ] ] }
+  },
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "pinData": {},
+  "tags": []
+}
