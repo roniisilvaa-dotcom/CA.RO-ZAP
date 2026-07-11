@@ -1,0 +1,6 @@
+{
+  "name": "CA.RO ZAP",
+  "description": "Plataforma SaaS de Atendimento Inteligente e CRM Multi-Tenant integrado com WhatsApp e Inteligência Artificial.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
