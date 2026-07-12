@@ -389,7 +389,7 @@ export default function ChatAtendimento({ tenant, contacts, onRefreshContacts }:
                     )}
                   </h3>
                   <p className="text-[10px] text-zinc-400">
-                    WhatsApp: {selectedContact.phone} | Responsável: <span className="font-semibold text-zinc-600 dark:text-zinc-300">{selectedContact.assignedTo ? 'Atendente rony' : 'Sem responsável'}</span>
+                    WhatsApp: {selectedContact.phone} | Responsável: <span className="font-semibold text-zinc-600 dark:text-zinc-300">{selectedContact.assignedTo ? 'Camila' : 'Sem responsável'}</span>
                   </p>
                 </div>
               </div>
