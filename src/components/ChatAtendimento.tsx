@@ -228,7 +228,7 @@ export default function ChatAtendimento({ tenant, contacts, onRefreshContacts }:
     <div className="grid grid-cols-1 lg:grid-cols-12 bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200/80 dark:border-zinc-800/80 shadow-sm overflow-hidden h-[calc(100vh-180px)] min-h-[500px]" id="chat_atendimento_panel">
       
       {/* 1. LEFT SIDEBAR: CONVERSATIONS LIST */}
-      <div className="lg:col-span-3 border-r border-zinc-200 dark:border-zinc-800 flex flex-col h-full bg-zinc-50/50 dark:bg-zinc-950/20">
+      <div className="lg:col-span-3 border-r border-zinc-200 dark:border-zinc-800 flex flex-col h-full min-h-0 bg-zinc-50/50 dark:bg-zinc-950/20">
         
         {/* Sidebar Header */}
         <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 space-y-3">
@@ -366,7 +366,7 @@ export default function ChatAtendimento({ tenant, contacts, onRefreshContacts }:
       </div>
 
       {/* 2. CENTRAL PANEL: ACTIVE CHAT WINDOW */}
-      <div className="lg:col-span-6 flex flex-col h-full bg-zinc-50 dark:bg-zinc-950/40">
+      <div className="lg:col-span-6 flex flex-col h-full min-h-0 bg-zinc-50 dark:bg-zinc-950/40">
         {selectedContact ? (
           <>
             {/* Active Chat Header */}
@@ -649,7 +649,7 @@ export default function ChatAtendimento({ tenant, contacts, onRefreshContacts }:
       </div>
 
       {/* 3. RIGHT SIDEBAR: LEAD DETAILS & CRM STAGE CONTROLS */}
-      <div className="lg:col-span-3 border-l border-zinc-200 dark:border-zinc-800 flex flex-col h-full overflow-y-auto bg-zinc-50/50 dark:bg-zinc-950/20 p-4 space-y-5">
+      <div className="lg:col-span-3 border-l border-zinc-200 dark:border-zinc-800 flex flex-col h-full min-h-0 overflow-y-auto bg-zinc-50/50 dark:bg-zinc-950/20 p-4 space-y-5">
         {selectedContact ? (
           <>
             {/* 3A. CRM Lead Score */}
