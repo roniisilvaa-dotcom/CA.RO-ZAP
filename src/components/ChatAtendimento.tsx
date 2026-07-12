@@ -78,7 +78,7 @@ export default function ChatAtendimento({ tenant, contacts, onRefreshContacts }:
         body: inputText,
         type: 'text',
         isInternalNote,
-        authorName: 'rony',
+        authorName: 'Camila',
       });
 
       setMessagesList(prev => [...prev, msg]);
@@ -95,7 +95,7 @@ export default function ChatAtendimento({ tenant, contacts, onRefreshContacts }:
             {
               id: 'n_' + Math.random().toString(36).substring(2, 9),
               body: inputText,
-              author: 'rony',
+              author: 'Camila',
               createdAt: new Date().toISOString()
             },
             ...(selectedContact.notes || [])
