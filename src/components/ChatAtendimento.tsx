@@ -280,7 +280,7 @@ export default function ChatAtendimento({ tenant, contacts, onRefreshContacts }:
         </div>
 
         {/* Contacts List Body */}
-        <div className="flex-1 overflow-y-auto divide-y divide-zinc-100 dark:divide-zinc-800/60">
+        <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-zinc-100 dark:divide-zinc-800/60">
           {filteredContacts.length > 0 ? (
             filteredContacts.map((contact) => {
               const isSelected = selectedContact?.id === contact.id;
@@ -425,7 +425,7 @@ export default function ChatAtendimento({ tenant, contacts, onRefreshContacts }:
             </div>
 
             {/* Chat Messages Log */}
-            <div className="flex-1 overflow-y-auto p-4 space-y-3.5 relative">
+            <div className="flex-1 min-h-0 overflow-y-auto p-4 space-y-3.5 relative">
               {isLoadingMessages ? (
                 <div className="absolute inset-0 bg-white/50 dark:bg-zinc-950/50 flex items-center justify-center">
                   <div className="flex flex-col items-center gap-2">
