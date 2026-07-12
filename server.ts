@@ -23,17 +23,16 @@ app.use(express.json({ limit: '5mb' }));
 
 const PORT = Number(process.env.PORT) || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'troque-este-segredo-em-producao';
-const EVOLUTION_URL = process.env.EVOLUTION_URL || 'https://evolution-api-production-bbc0.up.railway.app';
-const EVOLUTION_APIKEY = process.env.EVOLUTION_APIKEY || '';
+const PANEL_SEND_WEBHOOK = process.env.PANEL_SEND_WEBHOOK || 'https://carostudio.app.n8n.cloud/webhook/painel-envia';
 async function sendWhatsapp(instance: any, phone: any, text: any) {
-  if (!EVOLUTION_APIKEY || !instance || !phone || !text) return;
+  if (!instance || !phone || !text) return;
   try {
-    await fetch(EVOLUTION_URL + '/message/sendText/' + instance, {
+    await fetch(PANEL_SEND_WEBHOOK, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: EVOLUTION_APIKEY },
-      body: JSON.stringify({ number: phone, text }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ instance, number: phone, text }),
     });
-  } catch (e) { console.error('Evolution send failed:', e); }
+  } catch (e) { console.error('Envio pelo painel falhou:', e); }
 }
 
 // -------------------------------------------------------------------
