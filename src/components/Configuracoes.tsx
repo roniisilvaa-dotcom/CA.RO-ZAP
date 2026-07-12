@@ -30,7 +30,7 @@ export default function Configuracoes({ tenant, webhookLogs, onRefreshTenant, on
 
   // Team states
   const [team, setTeam] = useState<User[]>([
-    { id: 'u_1', name: 'rony silva (Você)', email: 'ronysiilvaa1@gmail.com', role: 'admin', tenantId: tenant.id, active: true },
+    { id: 'u_1', name: 'Camila Rocha (Você)', email: 'camila@carozap.com', role: 'admin', tenantId: tenant.id, active: true },
     { id: 'u_2', name: 'Júlia Costa', email: 'julia.costa@vitallis.com', role: 'manager', tenantId: tenant.id, active: true },
     { id: 'u_3', name: 'Thiago Silva', email: 'thiago.silva@barber.com', role: 'agent', tenantId: tenant.id, active: true }
   ]);
