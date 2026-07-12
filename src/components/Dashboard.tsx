@@ -67,7 +67,7 @@ export default function Dashboard({ tenant, contacts, auditLogs }: DashboardProp
             {tenant.niche}
           </span>
           <h1 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100 mt-1">
-            Olá, rony! Bem-vindo ao painel da {tenant.name}
+            Bem-vindo ao painel da {tenant.name}
           </h1>
           <p className="text-sm text-slate-500 dark:text-zinc-400 mt-1 font-medium">
             Acompanhe o desempenho de suas automações de WhatsApp e inteligência artificial em tempo real.
@@ -356,7 +356,7 @@ export default function Dashboard({ tenant, contacts, auditLogs }: DashboardProp
                   <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-white dark:border-zinc-900"></span>
                 </div>
                 <div>
-                  <p className="font-semibold text-zinc-800 dark:text-zinc-200">rony (Você)</p>
+                  <p className="font-semibold text-zinc-800 dark:text-zinc-200">Você</p>
                   <p className="text-zinc-400 text-[10px]">Administrador</p>
                 </div>
               </div>
