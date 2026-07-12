@@ -23,6 +23,18 @@ app.use(express.json({ limit: '5mb' }));
 
 const PORT = Number(process.env.PORT) || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'troque-este-segredo-em-producao';
+const EVOLUTION_URL = process.env.EVOLUTION_URL || 'https://evolution-api-production-bbc0.up.railway.app';
+const EVOLUTION_APIKEY = process.env.EVOLUTION_APIKEY || '';
+async function sendWhatsapp(instance: any, phone: any, text: any) {
+  if (!EVOLUTION_APIKEY || !instance || !phone || !text) return;
+  try {
+    await fetch(EVOLUTION_URL + '/message/sendText/' + instance, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: EVOLUTION_APIKEY },
+      body: JSON.stringify({ number: phone, text }),
+    });
+  } catch (e) { console.error('Evolution send failed:', e); }
+}
 
 // -------------------------------------------------------------------
 // Conexao com o Supabase (schema caro)
@@ -270,7 +282,7 @@ app.post('/api/contacts/:tenantId', auth, async (req: any, res) => {
 });
 
 app.get('/api/messages/:contactId', auth, async (req: any, res) => {
-  const own = await q('select id from caro.contacts where id = $1 and tenant_id = $2', [req.params.contactId, req.tenantId]);
+  const own = await q('select c.id, c.phone, t.evolution_instance as instance from caro.contacts c join caro.tenants t on t.id = c.tenant_id where c.id = $1 and c.tenant_id = $2', [req.params.contactId, req.tenantId]);
   if (!own.rowCount) return res.status(403).json({ error: 'Sem acesso a este contato.' });
   const r = await q('select * from caro.messages where contact_id = $1 order by created_at asc', [req.params.contactId]);
   res.json(r.rows.map(mapMessage));
@@ -278,7 +290,7 @@ app.get('/api/messages/:contactId', auth, async (req: any, res) => {
 
 app.post('/api/messages/:contactId', auth, async (req: any, res) => {
   try {
-    const own = await q('select id from caro.contacts where id = $1 and tenant_id = $2', [req.params.contactId, req.tenantId]);
+    const own = await q('select c.id, c.phone, t.evolution_instance as instance from caro.contacts c join caro.tenants t on t.id = c.tenant_id where c.id = $1 and c.tenant_id = $2', [req.params.contactId, req.tenantId]);
     if (!own.rowCount) return res.status(403).json({ error: 'Sem acesso.' });
     const b = req.body || {};
     const r = await q(
@@ -287,6 +299,10 @@ app.post('/api/messages/:contactId', auth, async (req: any, res) => {
       [req.tenantId, req.params.contactId, b.sender || 'agent', b.body || '', b.type || null, b.isInternalNote || false, b.authorName || null]
     );
     await q('update caro.contacts set last_message_at = now() where id = $1', [req.params.contactId]);
+    if (!b.isInternalNote) {
+      await sendWhatsapp(own.rows[0].instance, own.rows[0].phone, b.body || '');
+      await q('update caro.contacts set ai_auto_reply = false where id = $1', [req.params.contactId]);
+    }
     res.json(mapMessage(r.rows[0]));
   } catch (e: any) {
     res.status(500).json({ error: e.message });
