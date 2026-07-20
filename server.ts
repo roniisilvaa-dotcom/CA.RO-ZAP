@@ -302,6 +302,18 @@ function montarPersona(t: any) {
   return partes.filter(Boolean).join('\n');
 }
 
+// Lista os clientes (para diagnostico/administracao do motor)
+app.get('/api/motor/tenants', motorAuth, async (_req: any, res) => {
+  try {
+    const r = await q(
+      `select id, name, plan, status, evolution_instance, whatsapp_number,
+              coalesce(uso_mensagens,0) as uso_mensagens
+         from caro.tenants order by created_at asc limit 200`
+    );
+    res.json({ total: r.rowCount, clientes: r.rows });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // O motor chama isto a cada mensagem para saber de quem e e como responder
 app.get('/api/motor/tenant', motorAuth, async (req: any, res) => {
   try {
@@ -309,9 +321,13 @@ app.get('/api/motor/tenant', motorAuth, async (req: any, res) => {
     const numero = String(req.query.numero || '').replace(/\D/g, '');
     if (!instance && !numero) return res.status(400).json({ error: 'Informe instance ou numero.' });
 
+    // Comparacao tolerante: ignora maiusculas, espacos, acentos e simbolos
     const r = await q(
       `select * from caro.tenants
-        where ($1 <> '' and evolution_instance = $1)
+        where ($1 <> '' and lower(regexp_replace(coalesce(evolution_instance,''),'[^a-zA-Z0-9]+','','g'))
+                          = lower(regexp_replace($1,'[^a-zA-Z0-9]+','','g')))
+           or ($1 <> '' and lower(regexp_replace(coalesce(name,''),'[^a-zA-Z0-9]+','','g'))
+                          = lower(regexp_replace($1,'[^a-zA-Z0-9]+','','g')))
            or ($2 <> '' and regexp_replace(coalesce(whatsapp_number,''),'\\D','','g') = $2)
         limit 1`,
       [instance, numero]
