@@ -23,17 +23,6 @@ app.use(express.json({ limit: '5mb' }));
 
 const PORT = Number(process.env.PORT) || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'troque-este-segredo-em-producao';
-const PANEL_SEND_WEBHOOK = process.env.PANEL_SEND_WEBHOOK || 'https://carostudio.app.n8n.cloud/webhook/painel-envia';
-async function sendWhatsapp(instance: any, phone: any, text: any) {
-  if (!instance || !phone || !text) return;
-  try {
-    await fetch(PANEL_SEND_WEBHOOK, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ instance, number: phone, text }),
-    });
-  } catch (e) { console.error('Envio pelo painel falhou:', e); }
-}
 
 // -------------------------------------------------------------------
 // Conexao com o Supabase (schema caro)
@@ -43,6 +32,45 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false },
   max: 8,
 });
+
+// -------------------------------------------------------------------
+// E-mail (Resend) + limites por plano
+// -------------------------------------------------------------------
+const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
+const MAIL_FROM = process.env.MAIL_FROM || 'CA.RO ZAP <onboarding@resend.dev>';
+const APP_URL = process.env.APP_URL || 'https://caro-zap-production.up.railway.app';
+
+// Limite de mensagens de IA por plano
+const LIMITES: Record<string, number> = {
+  free: 200, essencial: 1000, profissional: 3000, premium: 10000,
+};
+
+// Envia e-mail via Resend. Se a chave nao existir, apenas registra e segue (nunca derruba o fluxo).
+async function sendEmail(to: string, subject: string, html: string): Promise<boolean> {
+  if (!RESEND_API_KEY) { console.warn('[email] RESEND_API_KEY ausente — nao enviei para', to); return false; }
+  try {
+    const r = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: MAIL_FROM, to, subject, html }),
+    });
+    if (!r.ok) { console.error('[email] Resend falhou', r.status, await r.text()); return false; }
+    return true;
+  } catch (e) { console.error('[email] erro', e); return false; }
+}
+
+function emailAcesso(email: string, senha: string) {
+  return `<div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:auto;color:#111">
+    <h2 style="color:#16a34a">Bem-vindo(a) ao CA.RO ZAP 💚</h2>
+    <p>Sua conta está pronta! Use os dados abaixo para entrar no painel:</p>
+    <p style="background:#f4f7f5;padding:16px;border-radius:10px">
+      <b>Painel:</b> <a href="${APP_URL}">${APP_URL}</a><br>
+      <b>Login:</b> ${email}<br>
+      <b>Senha:</b> ${senha}
+    </p>
+    <p style="color:#555;font-size:13px">Recomendamos trocar a senha após o primeiro acesso.</p>
+  </div>`;
+}
 
 async function q(text: string, params: any[] = []) {
   const client = await pool.connect();
@@ -67,9 +95,15 @@ async function ensureSchema() {
       created_at    timestamptz default now()
     );
   `);
+  // Auto-migracao: colunas de persona e de medicao de uso (seguro rodar varias vezes)
+  await q(`alter table caro.tenants add column if not exists assistente_nome text default '';`);
+  await q(`alter table caro.tenants add column if not exists persona        text default '';`);
+  await q(`alter table caro.tenants add column if not exists tom_de_voz     text default '';`);
+  await q(`alter table caro.tenants add column if not exists uso_mensagens  int  default 0;`);
+  await q(`alter table caro.tenants add column if not exists uso_reset_em   date default current_date;`);
 }
 
-// ------------------------------------------------------------------
+// -------------------------------------------------------------------
 // Mapeadores: colunas snake_case do banco -> tipos camelCase do app
 // -------------------------------------------------------------------
 function mapTenant(r: any) {
@@ -148,7 +182,7 @@ function auth(req: any, res: any, next: any) {
 // Cadastro: cria um tenant novo + o usuario dono dele (1 assinante = 1 perfil de IA)
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { email, password, name, businessName, niche, instance } = req.body;
+    const { email, password, name, businessName, niche, instance, plan } = req.body;
     if (!email || !password || !businessName) {
       return res.status(400).json({ error: 'Informe email, senha e nome do negocio.' });
     }
@@ -158,10 +192,14 @@ app.post('/api/auth/register', async (req, res) => {
     const evoInstance = (instance || businessName)
       .toLowerCase().normalize('NFD').replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
 
+    // Plano vindo da Kiwify (essencial/profissional/premium); default free
+    const planoOk = ['essencial', 'profissional', 'premium'].includes(String(plan || '').toLowerCase())
+      ? String(plan).toLowerCase() : 'free';
+
     const t = await q(
       `insert into caro.tenants (name, niche, plan, status, evolution_instance)
-       values ($1,$2,'free','active',$3) returning *`,
-      [businessName, niche || '', evoInstance]
+       values ($1,$2,$3,'active',$4) returning *`,
+      [businessName, niche || '', planoOk, evoInstance]
     );
     const tenant = t.rows[0];
     const hash = await bcrypt.hash(password, 10);
@@ -170,8 +208,10 @@ app.post('/api/auth/register', async (req, res) => {
        values ($1,$2,$3,$4,'admin') returning id`,
       [email.toLowerCase(), hash, name || '', tenant.id]
     );
+    // Boas-vindas por e-mail (nao bloqueia se o e-mail falhar)
+    await sendEmail(email.toLowerCase(), 'Seu acesso ao CA.RO ZAP', emailAcesso(email.toLowerCase(), password));
     const token = jwt.sign({ uid: u.rows[0].id, tid: tenant.id }, JWT_SECRET, { expiresIn: '30d' });
-    res.json({ token, tenant: mapTenant(tenant) });
+    res.json({ token, tenant: mapTenant(tenant), plano: planoOk });
   } catch (e: any) {
     console.error(e);
     res.status(500).json({ error: e.message });
@@ -193,6 +233,142 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
+// Esqueci minha senha: gera uma senha nova e envia por e-mail (fluxo simples, sem pagina extra)
+app.post('/api/auth/forgot', async (req, res) => {
+  try {
+    const email = String(req.body.email || '').toLowerCase().trim();
+    const r = await q('select id from caro.users where email = $1', [email]);
+    // resposta neutra: nao revela se o email existe
+    if (!r.rowCount) return res.json({ ok: true });
+    const nova = Math.random().toString(36).slice(2, 6) + Math.random().toString(36).slice(2, 6).toUpperCase() + Math.floor(Math.random() * 90 + 10);
+    const hash = await bcrypt.hash(nova, 10);
+    await q('update caro.users set password_hash = $1 where id = $2', [hash, r.rows[0].id]);
+    await sendEmail(email, 'Sua nova senha do CA.RO ZAP',
+      `<div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;color:#111">
+        <h2 style="color:#16a34a">Redefinição de senha</h2>
+        <p>Geramos uma senha nova para sua conta:</p>
+        <p style="background:#f4f7f5;padding:16px;border-radius:10px"><b>Nova senha:</b> ${nova}</p>
+        <p>Entre em <a href="${APP_URL}">${APP_URL}</a> e troque por uma de sua preferência.</p>
+      </div>`);
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// Trocar a senha (usuario logado)
+app.post('/api/auth/change-password', auth, async (req: any, res) => {
+  try {
+    const { atual, nova } = req.body;
+    if (!nova || String(nova).length < 6) return res.status(400).json({ error: 'A nova senha precisa ter ao menos 6 caracteres.' });
+    const r = await q('select password_hash from caro.users where id = $1', [req.userId]);
+    if (!r.rowCount) return res.status(404).json({ error: 'Usuario nao encontrado.' });
+    const ok = await bcrypt.compare(atual || '', r.rows[0].password_hash);
+    if (!ok) return res.status(401).json({ error: 'Senha atual incorreta.' });
+    const hash = await bcrypt.hash(nova, 10);
+    await q('update caro.users set password_hash = $1 where id = $2', [hash, req.userId]);
+    res.json({ ok: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// -------------------------------------------------------------------
+// API DO MOTOR (multi-cliente)
+// O motor no n8n nao alcanca o Supabase direto; ele pergunta aqui.
+// Protegido por chave compartilhada (header x-motor-key).
+// -------------------------------------------------------------------
+const MOTOR_KEY = process.env.MOTOR_KEY || '';
+
+function motorAuth(req: any, res: any, next: any) {
+  if (!MOTOR_KEY) return res.status(500).json({ error: 'MOTOR_KEY nao configurada no servidor.' });
+  if (req.headers['x-motor-key'] !== MOTOR_KEY) return res.status(401).json({ error: 'Nao autorizado.' });
+  next();
+}
+
+// Monta o texto de persona que a IA vai usar, a partir do que o cliente preencheu no painel
+function montarPersona(t: any) {
+  const assistente = (t.assistente_nome || '').trim() || 'Assistente';
+  const empresa = t.name || 'a empresa';
+  const partes = [
+    `Voce e ${assistente}, assistente virtual de ${empresa}${t.niche ? ` (segmento: ${t.niche})` : ''}.`,
+    `Sempre inicie suas mensagens com *${assistente}* em negrito do WhatsApp.`,
+    `Voce fala em nome da empresa, na terceira pessoa, com simpatia e objetividade.`,
+    t.tom_de_voz ? `Tom de voz: ${t.tom_de_voz}` : '',
+    t.persona ? `Instrucoes do cliente: ${t.persona}` : '',
+    t.kb_text ? `\n### Base de conhecimento\n${t.kb_text}` : '',
+    t.kb_catalogue ? `\n### Produtos e precos\n${t.kb_catalogue}` : '',
+    Array.isArray(t.kb_faqs) && t.kb_faqs.length
+      ? `\n### Perguntas frequentes\n${t.kb_faqs.map((f: any) => `P: ${f.q || f.pergunta || ''}\nR: ${f.a || f.resposta || ''}`).join('\n')}`
+      : '',
+    `\nSe nao souber algo ou o cliente pedir um humano, ofereca transferir para a equipe.`,
+  ];
+  return partes.filter(Boolean).join('\n');
+}
+
+// O motor chama isto a cada mensagem para saber de quem e e como responder
+app.get('/api/motor/tenant', motorAuth, async (req: any, res) => {
+  try {
+    const instance = String(req.query.instance || '').trim();
+    const numero = String(req.query.numero || '').replace(/\D/g, '');
+    if (!instance && !numero) return res.status(400).json({ error: 'Informe instance ou numero.' });
+
+    const r = await q(
+      `select * from caro.tenants
+        where ($1 <> '' and evolution_instance = $1)
+           or ($2 <> '' and regexp_replace(coalesce(whatsapp_number,''),'\\D','','g') = $2)
+        limit 1`,
+      [instance, numero]
+    );
+    if (!r.rowCount) return res.status(404).json({ error: 'Cliente nao encontrado', ativo: false });
+
+    const t = r.rows[0];
+    const plano = String(t.plan || 'free').toLowerCase();
+    const limite = plano === 'cortesia' ? 999999999 : (LIMITES[plano] ?? LIMITES.free);
+
+    // Reinicia o contador quando vira o mes
+    let uso = Number(t.uso_mensagens || 0);
+    const reset = t.uso_reset_em ? new Date(t.uso_reset_em) : null;
+    const agora = new Date();
+    const virouMes = !reset || reset.getMonth() !== agora.getMonth() || reset.getFullYear() !== agora.getFullYear();
+    if (virouMes) {
+      await q('update caro.tenants set uso_mensagens = 0, uso_reset_em = current_date where id = $1', [t.id]);
+      uso = 0;
+    }
+
+    const dentroDoLimite = uso < limite;
+    const ativo = String(t.status || 'active') === 'active' && dentroDoLimite;
+
+    res.json({
+      ativo,
+      motivo: !dentroDoLimite ? 'limite_atingido' : (String(t.status) !== 'active' ? 'assinatura_inativa' : null),
+      tenantId: t.id,
+      empresa: t.name,
+      assistente: (t.assistente_nome || '').trim() || 'Assistente',
+      instancia: t.evolution_instance,
+      plano, limite, uso, restante: Math.max(0, limite - uso),
+      persona: montarPersona(t),
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// O motor chama isto depois de responder, para contar a mensagem
+app.post('/api/motor/uso', motorAuth, async (req: any, res) => {
+  try {
+    const { tenantId, instance, quantidade } = req.body || {};
+    const qtd = Math.max(1, Number(quantidade) || 1);
+    const r = await q(
+      `update caro.tenants
+          set uso_mensagens = coalesce(uso_mensagens,0) + $1
+        where ($2::uuid is not null and id = $2::uuid)
+           or ($3 <> '' and evolution_instance = $3)
+        returning id, plan, uso_mensagens, status`,
+      [qtd, tenantId || null, String(instance || '')]
+    );
+    if (!r.rowCount) return res.status(404).json({ error: 'Cliente nao encontrado' });
+    const t = r.rows[0];
+    const plano = String(t.plan || 'free').toLowerCase();
+    const limite = plano === 'cortesia' ? 999999999 : (LIMITES[plano] ?? LIMITES.free);
+    res.json({ ok: true, uso: t.uso_mensagens, limite, restante: Math.max(0, limite - t.uso_mensagens), bloqueado: t.uso_mensagens >= limite });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/me', auth, async (req: any, res) => {
   const u = await q('select id, email, name, role, tenant_id from caro.users where id = $1', [req.userId]);
   res.json(u.rows[0] || null);
@@ -200,7 +376,7 @@ app.get('/api/me', auth, async (req: any, res) => {
 
 // -------------------------------------------------------------------
 // Dados do painel (sempre restritos ao tenant do usuario logado)
-// ------------------------------------------------------------------
+// -------------------------------------------------------------------
 app.get('/api/tenants', auth, async (req: any, res) => {
   const r = await q('select * from caro.tenants where id = $1', [req.tenantId]);
   res.json(r.rows.map(mapTenant));
@@ -281,7 +457,8 @@ app.post('/api/contacts/:tenantId', auth, async (req: any, res) => {
 });
 
 app.get('/api/messages/:contactId', auth, async (req: any, res) => {
-  const own = await q('select c.id, c.phone, t.evolution_instance as instance from caro.contacts c join caro.tenants t on t.id = c.tenant_id where c.id = $1 and c.tenant_id = $2', [req.params.contactId, req.tenantId]);
+  // confere que o contato pertence ao tenant do usuario
+  const own = await q('select id from caro.contacts where id = $1 and tenant_id = $2', [req.params.contactId, req.tenantId]);
   if (!own.rowCount) return res.status(403).json({ error: 'Sem acesso a este contato.' });
   const r = await q('select * from caro.messages where contact_id = $1 order by created_at asc', [req.params.contactId]);
   res.json(r.rows.map(mapMessage));
@@ -289,7 +466,7 @@ app.get('/api/messages/:contactId', auth, async (req: any, res) => {
 
 app.post('/api/messages/:contactId', auth, async (req: any, res) => {
   try {
-    const own = await q('select c.id, c.phone, t.evolution_instance as instance from caro.contacts c join caro.tenants t on t.id = c.tenant_id where c.id = $1 and c.tenant_id = $2', [req.params.contactId, req.tenantId]);
+    const own = await q('select id from caro.contacts where id = $1 and tenant_id = $2', [req.params.contactId, req.tenantId]);
     if (!own.rowCount) return res.status(403).json({ error: 'Sem acesso.' });
     const b = req.body || {};
     const r = await q(
@@ -298,10 +475,6 @@ app.post('/api/messages/:contactId', auth, async (req: any, res) => {
       [req.tenantId, req.params.contactId, b.sender || 'agent', b.body || '', b.type || null, b.isInternalNote || false, b.authorName || null]
     );
     await q('update caro.contacts set last_message_at = now() where id = $1', [req.params.contactId]);
-    if (!b.isInternalNote) {
-      await sendWhatsapp(own.rows[0].instance, own.rows[0].phone, b.body || '');
-      await q('update caro.contacts set ai_auto_reply = false where id = $1', [req.params.contactId]);
-    }
     res.json(mapMessage(r.rows[0]));
   } catch (e: any) {
     res.status(500).json({ error: e.message });
@@ -325,7 +498,7 @@ app.get('/api/health', async (_req, res) => {
 
 // -------------------------------------------------------------------
 // Servir o painel React (build do Vite em /dist)
-// ------------------------------------------------------------------
+// -------------------------------------------------------------------
 app.use(express.static(path.join(__dirname, 'dist')));
 app.get('*', (_req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
