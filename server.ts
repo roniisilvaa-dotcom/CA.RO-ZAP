@@ -546,6 +546,106 @@ app.get('/api/health', async (_req, res) => {
 // -------------------------------------------------------------------
 // Servir o painel React (build do Vite em /dist)
 // -------------------------------------------------------------------
+// -------------------------------------------------------------------
+// Politica de Privacidade e Termos (exigidos pelo App Review do Meta)
+// -------------------------------------------------------------------
+const PAGINA_LEGAL = (titulo: string, corpo: string) => `<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${titulo} — CA.RO ZAP</title>
+<style>
+ body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:#f6f8f7;color:#16211b;margin:0;padding:40px 20px;line-height:1.7}
+ .box{max-width:780px;margin:auto;background:#fff;border-radius:16px;padding:44px 40px;box-shadow:0 6px 30px rgba(0,0,0,.06)}
+ h1{font-size:30px;margin:0 0 6px} h2{font-size:19px;margin:32px 0 10px;color:#0e7d44}
+ .marca{display:inline-flex;align-items:center;gap:10px;font-weight:800;color:#0e7d44;margin-bottom:18px}
+ .marca span{width:34px;height:34px;border-radius:10px;background:linear-gradient(145deg,#1dff78,#07954a);display:grid;place-items:center;color:#04170c}
+ small{color:#69796f} ul{padding-left:20px} a{color:#0e7d44}
+ footer{margin-top:36px;padding-top:18px;border-top:1px solid #e6ebe8;color:#69796f;font-size:14px}
+</style></head><body><div class="box">
+<div class="marca"><span>C</span> CA.RO ZAP</div>
+<h1>${titulo}</h1><small>Última atualização: ${new Date().toLocaleDateString('pt-BR')}</small>
+${corpo}
+<footer>CA.RO ZAP é um produto da <b>CA.RO TECH</b>. Dúvidas sobre privacidade e dados: <a href="mailto:contato@carostudio.com.br">contato@carostudio.com.br</a></footer>
+</div></body></html>`;
+
+app.get('/privacidade', (_req, res) => {
+  res.type('html').send(PAGINA_LEGAL('Política de Privacidade', `
+<h2>1. Quem somos</h2>
+<p>O CA.RO ZAP é uma plataforma de atendimento e vendas por WhatsApp com inteligência artificial, operada pela CA.RO TECH. Esta política explica quais dados tratamos, por quê, e quais são os seus direitos.</p>
+
+<h2>2. Dados que coletamos</h2>
+<ul>
+  <li><b>Do cliente assinante:</b> nome, e-mail, nome do negócio, segmento e dados de acesso ao painel.</li>
+  <li><b>Das conversas de WhatsApp:</b> número de telefone, nome de exibição e o conteúdo das mensagens trocadas entre o assinante e os contatos dele.</li>
+  <li><b>Configurações da IA:</b> textos, perguntas frequentes e catálogos que o assinante cadastra para treinar o atendimento.</li>
+  <li><b>Dados técnicos:</b> registros de uso, data e hora das interações e métricas de volume de mensagens.</li>
+</ul>
+
+<h2>3. Como usamos os dados</h2>
+<ul>
+  <li>Para gerar respostas automáticas de atendimento em nome do assinante.</li>
+  <li>Para exibir o histórico de conversas e o funil de vendas no painel do assinante.</li>
+  <li>Para medir o consumo de mensagens conforme o plano contratado.</li>
+  <li>Para suporte técnico, segurança e prevenção a abusos.</li>
+</ul>
+<p>Não vendemos dados pessoais e não usamos o conteúdo das conversas dos assinantes para publicidade.</p>
+
+<h2>4. Compartilhamento com terceiros</h2>
+<p>Compartilhamos dados apenas com prestadores necessários à operação, e somente no limite exigido:</p>
+<ul>
+  <li><b>Meta Platforms (WhatsApp Business Platform):</b> envio e recebimento das mensagens.</li>
+  <li><b>Provedores de modelo de linguagem:</b> processamento do texto para gerar a resposta.</li>
+  <li><b>Infraestrutura de nuvem e banco de dados:</b> hospedagem e armazenamento.</li>
+  <li><b>Processador de pagamentos:</b> cobrança da assinatura.</li>
+</ul>
+
+<h2>5. Retenção e exclusão</h2>
+<p>Mantemos os dados enquanto a assinatura estiver ativa. Após o encerramento, os dados são eliminados ou anonimizados em até 90 dias, salvo obrigação legal de guarda. O assinante pode solicitar a exclusão a qualquer momento.</p>
+
+<h2>6. Segurança</h2>
+<p>Adotamos criptografia em trânsito, controle de acesso por autenticação e senhas armazenadas com hash. Cada assinante acessa exclusivamente os dados do próprio negócio.</p>
+
+<h2>7. Seus direitos (LGPD)</h2>
+<p>Nos termos da Lei nº 13.709/2018, você pode solicitar confirmação de tratamento, acesso, correção, portabilidade, anonimização ou exclusão dos seus dados, bem como revogar consentimento. Basta escrever para o contato no rodapé.</p>
+
+<h2>8. Contatos que iniciam conversa</h2>
+<p>Quando alguém envia mensagem ao WhatsApp de um assinante, tratamos esses dados como operadores, em nome do assinante, que é o controlador da relação com o próprio cliente.</p>
+
+<h2>9. Alterações</h2>
+<p>Podemos atualizar esta política. Mudanças relevantes serão comunicadas pelo painel ou por e-mail.</p>
+`));
+});
+
+app.get('/termos', (_req, res) => {
+  res.type('html').send(PAGINA_LEGAL('Termos de Uso', `
+<h2>1. Objeto</h2>
+<p>O CA.RO ZAP fornece, por assinatura, uma plataforma de atendimento automatizado por WhatsApp com inteligência artificial, painel de acompanhamento e funil de vendas.</p>
+
+<h2>2. Assinatura e planos</h2>
+<p>Os planos possuem limite mensal de mensagens de IA, informado no momento da contratação. Ao atingir o limite, o atendimento automático é pausado até a renovação do ciclo ou a mudança de plano. Não há fidelidade; o cancelamento pode ser feito a qualquer momento.</p>
+
+<h2>3. Responsabilidades do assinante</h2>
+<ul>
+  <li>Fornecer informações verdadeiras para o treinamento da IA.</li>
+  <li>Utilizar a plataforma em conformidade com as políticas do WhatsApp e com a legislação vigente.</li>
+  <li>Não enviar mensagens não solicitadas em massa, conteúdo ilícito, enganoso ou que viole direitos de terceiros.</li>
+  <li>Manter a confidencialidade das credenciais de acesso.</li>
+</ul>
+
+<h2>4. Uso da inteligência artificial</h2>
+<p>As respostas são geradas automaticamente a partir das informações cadastradas pelo assinante. O assinante é responsável pelo conteúdo que disponibiliza e deve revisar informações sensíveis, como preços e condições comerciais.</p>
+
+<h2>5. Disponibilidade</h2>
+<p>Empregamos esforços para manter o serviço disponível de forma contínua, mas ele pode sofrer interrupções por manutenção ou por indisponibilidade de terceiros, incluindo a plataforma do WhatsApp.</p>
+
+<h2>6. Suspensão</h2>
+<p>Podemos suspender contas em caso de inadimplência, uso abusivo, violação destes termos ou das políticas do WhatsApp.</p>
+
+<h2>7. Foro</h2>
+<p>Aplica-se a legislação brasileira, ficando eleito o foro do domicílio do assinante para dirimir controvérsias.</p>
+`));
+});
+
 app.use(express.static(path.join(__dirname, 'dist')));
 app.get('*', (_req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
