@@ -302,6 +302,37 @@ function montarPersona(t: any) {
   return partes.filter(Boolean).join('\n');
 }
 
+// Ajusta dados do cliente (administracao). Usado para configurar persona, plano e instancia.
+app.patch('/api/motor/tenant/:id', motorAuth, async (req: any, res) => {
+  try {
+    const b = req.body || {};
+    const r = await q(
+      `update caro.tenants set
+         assistente_nome    = coalesce($2, assistente_nome),
+         persona            = coalesce($3, persona),
+         tom_de_voz         = coalesce($4, tom_de_voz),
+         plan               = coalesce($5, plan),
+         evolution_instance = coalesce($6, evolution_instance),
+         whatsapp_number    = coalesce($7, whatsapp_number),
+         status             = coalesce($8, status)
+       where id = $1
+       returning id, name, assistente_nome, plan, status, evolution_instance, whatsapp_number`,
+      [
+        req.params.id,
+        b.assistenteNome ?? null,
+        b.persona ?? null,
+        b.tomDeVoz ?? null,
+        b.plano ?? null,
+        b.instancia ?? null,
+        b.numero ?? null,
+        b.status ?? null,
+      ]
+    );
+    if (!r.rowCount) return res.status(404).json({ error: 'Cliente nao encontrado' });
+    res.json({ ok: true, cliente: r.rows[0] });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 // Lista os clientes (para diagnostico/administracao do motor)
 app.get('/api/motor/tenants', motorAuth, async (_req: any, res) => {
   try {
